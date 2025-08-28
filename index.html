@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Sierra Leone DAP Dashboard</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<style>
+    body, html { margin: 0; height: 100%; font-family: Arial, sans-serif; }
+    header { background: #2c3e50; color: white; padding: 10px; text-align: center; }
+    #main { display: flex; height: calc(100vh - 60px); }
+    #leftPanel { flex: 3; display: flex; flex-direction: column; padding: 10px; box-sizing: border-box; overflow-y: auto; }
+    #chartsContainer { display: grid; grid-template-columns: 1fr 1fr; grid-gap: 15px; }
+    .chart-box { background: #fff; border: 1px solid #ddd; border-radius: 8px; padding: 10px; text-align: center; position: relative; }
+    .export-btn { font-size: 12px; padding: 4px 6px; margin-top: 6px; cursor: pointer; }
+    #controls { display: flex; gap: 10px; padding: 10px; background: #f8f8f8; margin-bottom: 10px; flex-wrap: wrap; }
+    #sidebar { flex: 1; background: #f4f4f4; padding: 10px; overflow-y: auto; border-left: 1px solid #ddd; }
+    .location-item { padding: 6px; cursor: pointer; border-bottom: 1px solid #ccc; }
+    .location-item:hover { background: #eef; }
+    #mapView { display: none; height: 100%; }
+    #sidebarDetails img { width: 100%; border-radius: 8px; margin-bottom: 8px; }
+    #exportControls { margin: 10px 0; display: flex; gap: 10px; flex-wrap: wrap; }
+    button { cursor: pointer; }
+</style>
+</head>
+<body>
+<header>
+<h1>Sierra Leone DAP Dashboard</h1>
+<p>Interactive Charts, Filters, and Map View</p>
+</header>
+<div id="main">
+  <div id="leftPanel">
+    <div id="controls">
+      <input type="text" id="searchInput" placeholder="🔍 Search by name or district...">
+      <select id="provinceFilter"><option value="">All Provinces</option></select>
+      <select id="districtFilter"><option value="">All Districts</option></select>
+      <button id="resetBtn">🔄 Reset</button>
+    </div>
+
+    <!-- Export and Print Buttons -->
+    <div id="exportControls">
+      <button id="downloadPDF">📄 Download All Charts (PDF)</button>
+      <button id="downloadCSV">⬇ Export Location List (CSV)</button>
+      <button id="printDashboard">🖨 Print Dashboard</button>
+    </div>
+
+    <div id="chartsContainer">
+      <div class="chart-box">
+        <h3>Locations by Province</h3>
+        <canvas id="provinceChart"></canvas>
+        <button class="export-btn" onclick="downloadChart(provinceChart, 'province_chart.png')">Download PNG</button>
+      </div>
+      <div class="chart-box">
+        <h3>Locations by District</h3>
+        <canvas id="districtChart"></canvas>
+        <button class="export-btn" onclick="downloadChart(districtChart, 'district_chart.png')">Download PNG</button>
+      </div>
+      <div class="chart-box">
+        <h3>Final Verdict</h3>
+        <canvas id="verdictChart"></canvas>
+        <button class="export-btn" onclick="downloadChart(verdictChart, 'verdict_chart.png')">Download PNG</button>
+      </div>
+      <div class="chart-box">
+        <h3>Building Condition</h3>
+        <canvas id="conditionChart"></canvas>
+        <button class="export-btn" onclick="downloadChart(conditionChart, 'condition_chart.png')">Download PNG</button>
+      </div>
+    </div>
+
+    <div id="mapView">
+      <button id="backBtn" style="margin:10px;">← Back to Dashboard</button>
+      <div style="display:flex;height:90%;">
+        <div id="map" style="flex:2;"></div>
+        <div id="sidebarDetails" style="flex:1;padding:10px;background:#fff;">
+          <h3 id="detailTitle"></h3>
+          <img src="" alt="Location image" id="detailImage">
+          <p><b>Plus Code:</b> <span id="detailPluscode"></span></p>
+          <p><b>Condition:</b> <span id="detailCondition"></span></p>
+          <p><b>Power Source:</b> <span id="detailPower"></span></p>
+          <p><b>Final Verdict:</b> <span id="detailVerdict"></span></p>
+          <p><b>Notes:</b> <span id="detailNotes"></span></p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="sidebar">
+    <h3>Locations</h3>
+    <div id="locationList"></div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+<script>
+// ================== FULL DATASET ===================
+const locations = [
+
+  {name:"Central Library HQ", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4860125, lon:-13.2328594, condition:"Excellent", power:"Grid", verdict:"Conditionally Feasible", notes:"Work station is available but not functional. Machines are faulty and incomplete", score:"11", download:"781", upload:"9", latency:"359", Pluscode:"FQP8+CV2", image:"images/Central_Library_HQ.jpg"},
+  {name:"General Post Office", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4885625, lon:-13.2345625, condition:"Excellent", power:"Grid", verdict:"Conditionally Feasible", notes:"Ideal for DAP", score:"11", download:"1.79", upload:"165", latency:"154", Pluscode:"FQQ8+C5", image:"images/General_Post_Office.jpg"},
+  {name:"Cline town Post office", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4818125, lon:-13.2098125, condition:"Needs Repair", power:"Grid", verdict:"Not Feasible", notes:"Space is small and needs renovation. But very accessible. ", score:"6", download:"114", upload:"78", latency:"103", Pluscode:"FQJR+P3", image:"images/Cline_town_Post_office.jpg"},
+  {name:"New England Post office", district:"Western Area Urban (Freetown)", region:"Western", lat:null, lon:null, condition:"Needs Repair", power:"None", verdict:"Not Feasible", notes:"No internet. No light . No workstation. No Backup power", score:"7", download:"33.4", upload:"30.9", latency:"113", Pluscode:"", image:"images/New_England_Post_office.jpg"},
+  {name:"Aberdeen Post Office", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4931875, lon:-13.2875625, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"No internet connection. Gated building and secured. Wide space but room for DAP is not too big", score:"8", download:"139", upload:"92.7", latency:"101", Pluscode:"FPV6+7X", image:"images/Aberdeen_Post_Office.jpg"},
+  {name:"Waterloo Post Office", district:"Western Area Rural", region:"Western", lat:8.3265875, lon:-13.0645469, condition:"Excellent", power:"None", verdict:"Conditionally Feasible", notes:"No internet", score:"8", download:"53.9", upload:"15.7", latency:"117", Pluscode:"8WGP+J5P", image:"images/Waterloo_Post_Office.jpg"},
+  {name:"Goderich Branch Library", district:"Western Area Rural", region:"Western", lat:8.4328125, lon:-13.2775625, condition:"Excellent", power:"Grid", verdict:"Conditionally Feasible", notes:"There was no internet in the location", score:"9", download:"6.77", upload:"11.1", latency:"100", Pluscode:"CPMC+4X", image:"images/Goderich_Branch_Library.jpg"},
+
+  
+  {name:"Kissy Library", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4710625, lon:-13.1861094, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"Excellent building condition", score:"17", download:"881", upload:"1.02", latency:"155", Pluscode:"FRC7+CHC", image:"images/Kissy_Library.jpg"},
+  {name:"Waterloo Library", district:"Western Area Rural", region:"Western", lat:8.3383125, lon:-13.0753125, condition:"Excellent", power:"Grid", verdict:"Conditionally Feasible", notes:"The facility had no internet access  Only bike comes here from the main junction because road is Bumpy", score:"10", download:"58.3", upload:"26", latency:"118", Pluscode:"8WQF+8V", image:"images/Waterloo_Library.jpg"},
+  {name:"United Methodist University", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4721125, lon:-13.2477344, condition:"Excellent", power:"Grid", verdict:"Conditionally Feasible", notes:"No workstation available", score:"13", download:"60", upload:"14", latency:"104", Pluscode:"FQC2+RWR", image:"images/United_Methodist_University.jpg"},
+  {name:"Limkokwing University", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4513875, lon:-13.2388594, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"University has digital LEARNING CENTER and have big labs but they don’t have that dedicated space for a DAP. Except an open space that a booth could be mounted for DAP", score:"18", download:"93.4", upload:"32.6", latency:"128", Pluscode:"FQ26+HF2", image:"images/Limkokwing_University.jpg"},
+  {name:"Makeni City Library", district:"Bombali", region:"Northern", lat:51.3383125, lon:-84.0753125, condition:"Excellent", power:"Grid", verdict:"Conditionally Feasible", notes:"Facility does not have internet so personal mobile internet to test connectivity", score:"11", download:"147", upload:"1.5", latency:"17", Pluscode:"8WQF+8V", image:"images/Makeni_City_Library.jpg"},
+
+
+
+  {name:"Makeni Regional Library", district:"Bombali", region:"Northern", lat:22.3265875, lon:-103.0645469, condition:"Good", power:"Solar", verdict:"Conditionally Feasible", notes:"Internet service was given by American embassy", score:"8", download:"705", upload:"160", latency:"141", Pluscode:"8WGP+J5P", image:"images/Makeni_Regional_Library.jpg"},
+  {name:"Makeni Post Office", district:"Bombali", region:"Northern", lat:37.4683125, lon:-47.9180625, condition:"Needs Repair", power:"None", verdict:"Not Feasible", notes:"Place is not functioning but post master is still active. It’s an empty space with no facilities. Needs more facelift. ", score:"7", download:"447", upload:"3.4", latency:"32", Pluscode:"VXJ4+X6", image:"images/Makeni_Post_Office.jpg"},
+  {name:"Tonkolili District Library", district:"Tonkolili", region:"Northern", lat:51.4514375, lon:-84.2388125, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"No internet connectivity so mobile internet was used", score:"8", download:"1.1", upload:"15.4", latency:"29", Pluscode:"FQ26+HF2", image:"images/Tonkolili_District_Library.jpg"},
+  {name:"Bo Post Office", district:"Bo", region:"Southern", lat:7.9611875, lon:-13.7414375, condition:"Good", power:"None", verdict:"Conditionally Feasible", notes:"No internet connectivity so mobile orange was used. They have 2 more rooms available which need a bit of maintainance", score:"8", download:"37", upload:"24", latency:"131", Pluscode:"X765+FC", image:"images/Bo_Post_Office.jpg"},
+  {name:"Magburaka Post Office", district:"Tonkolili", region:"Northern", lat:37.7225625, lon:-47.9503125, condition:"Needs Repair", power:"None", verdict:"Not Feasible", notes:"Place is deserted. Needs facelift and it’s empty. But there is a space available", score:"5", download:"44", upload:"3.7", latency:"27", Pluscode:"P2FX+2V", image:"images/Magburaka_Post_Office.jpg"},
+  {name:"Mile 91 Library", district:"Tonkolili", region:"Northern", lat:51.4634375, lon:-82.2038125, condition:"Good", power:"None", verdict:"Not Feasible", notes:"Road is unmotorable", score:"5", download:"94.1", upload:"26.9", latency:"153", Pluscode:"FQ7W+9F", image:"images/mile_91_lib.jpg"},
+  {name:"Koinadugu District Library", district:"Koinadugu", region:"Northern", lat:37.5832135, lon:-47.5504375, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"Wide space and very conducive for DAP", score:"15", download:"13.8", upload:"457", latency:"118", Pluscode:"HCMX+GR", image:"images/Koinadugu_District_Library.jpg"},
+  {name:"Bo Regional Library", district:"Bo", region:"Southern", lat:8.1170875, lon:-13.0689219, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"The human traffic is high because of the university students. Mobile internet was used", score:"8", download:"73", upload:"34", latency:"119", Pluscode:"X722+86", image:"images/Bo_Regional_Library.jpg"},
+  {name:"Koinadugu Post Office", district:"Koinadugu", region:"Northern", lat:null, lon:null, condition:"Needs Repair", power:"None", verdict:"Not Feasible", notes:"Place needs a facelift. It’s functional but not in good shape. No computer lab", score:"5", download:"19.2", upload:"5.36", latency:"133", Pluscode:"", image:"images/Kono_Koidu_Post_Office.jpg"},
+  {name:"University of Lunsar", district:"Port Loko", region:"Northern", lat:null, lon:null, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"Excellent location perfect for DAP. Has solar and backup generetor", score:"19", download:"179", upload:"5.24", latency:"126", Pluscode:"", image:"images/University_of_Lunsar.jpg"},
+  {name:"Port Loko City Library", district:"Port Loko", region:"Northern", lat:null, lon:null, condition:"Excellent", power:"Grid", verdict:"Conditionally Feasible", notes:"Quiet Location. No internet. Mobile Internet was used", score:"12", download:"56.7", upload:"22.1", latency:"144", Pluscode:"", image:"images/Port_Loko_City_Library.jpg"},
+  {name:"Pujehun Library", district:"Pujehun", region:"Southern", lat:8.3538125, lon:-13.7194375, condition:"Good", power:"Solar", verdict:"Feasible", notes:"Out of 10 computers avalibale only 2 are working. No internet service. Mobile ineternet was used", score:"17", download:"56", upload:"34", latency:"102", Pluscode:"973J+G6M", image:"images/Pujehun_Library.jpg"},
+  {name:"Moyamba Libary", district:"Moyamba", region:"Southern", lat:8.1610625, lon:-13.4366875, condition:"Good", power:"Solar", verdict:"Conditionally Feasible", notes:"Main source of power is solar but is damaged due to rain storm. No internet service. Mobile ineternet was used", score:"14", download:"175", upload:"31", latency:"101", Pluscode:"5H67+C8", image:"images/Moyamba_Libary.jpg"},
+  {name:"Falaba District Library", district:"Falaba", region:"Northern", lat:37.5316875, lon:-47.9575625, condition:"Good", power:"Solar", verdict:"Conditionally Feasible", notes:"Computer lab is not too big. No lightening facility, depends on solar", score:"9", download:"18.1", upload:"5.31", latency:"102", Pluscode:"G2JR+MX", image:"images/Falaba_District_Library.jpg"},
+
+
+
+  {name:"Moyamba Post Office", district:"Moyamba", region:"Southern", lat:8.1610625, lon:-13.4366875, condition:"Needs Repair", power:"None", verdict:"Not Feasible", notes:"The building has been Abandoned for over 10years. No internet service. Mobile ineternet was used", score:"5", download:"176", upload:"7", latency:"110", Pluscode:"5H67+C8", image:"images/Moyamba_Post_Office.jpg"},
+  {name:"Moyamba District Council", district:"Moyamba", region:"Southern", lat:8.1616875, lon:-13.4395625, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"The distance from other community to the concil is a mimumim of 2 hours and maximum of 4 hours. No internet service. Mobile ineternet was used", score:"9", download:"19", upload:"7", latency:"108", Pluscode:"5H66+M5", image:"images/Moyamba_District_Council.jpg"},
+  {name:"EBK University", district:"Bombali", region:"Northern", lat:null, lon:null, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"Great location for DAP. ", score:"18", download:"103", upload:"19", latency:"50", Pluscode:"", image:"images/EBK_University.jpg"},
+  {name:"Bumbuna Library", district:"Tonkolili", region:"Northern", lat:51.4886875, lon:-84.2378125, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"No internet service. Mobile ineternet was used", score:"18", download:"99.2", upload:"7.99", latency:"55", Pluscode:"FQQ6+FV8", image:"images/Bumbuna_Library.jpg"},
+  {name:"Kambia District Library", district:"Kambia", region:"Northern", lat:51.1221875, lon:-83.9106875, condition:"Excellent", power:"Solar", verdict:"Conditionally Feasible", notes:"No internet service. Mobile ineternet was used", score:"10", download:"19.2", upload:"5.36", latency:"113", Pluscode:"43CJ+VQ", image:"images/Kambia_District_Library.jpg"},
+  {name:"Kambia Post Office", district:"Kambia", region:"Northern", lat:37.5832135, lon:-47.9180625, condition:"Needs Repair", power:"None", verdict:"Not Feasible", notes:"Building is deserted. Empty and needs lots of repair.", score:"5", download:"17.2", upload:"5.12", latency:"115", Pluscode:"43CJ+VQ", image:"images/Kambia_Post_Office.jpg"},
+  {name:"Lunsar Post Office", district:"Port Loko", region:"Northern", lat:37.6855625, lon:-47.5331875, condition:"Needs Repair", power:"None", verdict:"Not Feasible", notes:"Building is not functional as a post office. Rented to Ecobank but they left . Needs facelifts", score:"3", download:"", upload:"", latency:"", Pluscode:"MFP8+6P", image:"images/Lunsar_Post_Office.jpg"},
+  {name:"Karene District Library", district:"Karene", region:"Northern", lat:37.5832135, lon:-48.2536875, condition:"Good", power:"Generator", verdict:"Conditionally Feasible", notes:"Community does not have light. It’s in the process but not yet completed", score:"8", download:"6.9", upload:"28.1", latency:"163", Pluscode:"FP9W+8H", image:"images/Karene_District_Library.jpg"},
+  {name:"Rokupr Post Office", district:"Kambia", region:"Northern", lat:22.3360875, lon:-103.0752656, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"Place is burnt and destroyed. Got destroyed during the war", score:"3", download:"", upload:"", latency:"", Pluscode:"8WPF+CVQ", image:"images/Rokupr_Post_Office.jpg"},
+  {name:"Port Loko District Library", district:"Port Loko", region:"Northern", lat:51.7740625, lon:-83.7868675, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"Internet is via a modem and currently not subscribed now so internet test was done with mobile phone", score:"10", download:"19.2", upload:"25.2", latency:"118", Pluscode:"Q6F7+J8", image:"images/Port_Loko_District_Library.jpg"},
+  {name:"Kambia District Council", district:"Kambia", region:"Northern", lat:null, lon:null, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"Good internet connection", score:"16", download:"105", upload:"22", latency:"48", Pluscode:"", image:"images/Kambia_District_Council.jpg"},
+  {name:"Levuma Post Office", district:"Moyamba", region:"Southern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"The building has been broken down. Location unknown", score:"3", download:"", upload:"", latency:"", Pluscode:"", image:"images/Levuma_Post_Office.jpg"},
+  {name:"Pujehun Post Office", district:"Pujehun", region:"Southern", lat:8.3573125, lon:-13.7283125, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"The building has been turned into a church", score:"3", download:"", upload:"", latency:"", Pluscode:"974C+WM", image:"images/Pujehun_Post_Office.jpg"},
+  {name:"Bo City Library", district:"Bo", region:"Southern", lat:7.9680625, lon:-12.7461875, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"Persons with Disabilities are hand lifted to access the place", score:"12", download:"5", upload:"6.2", latency:"208", Pluscode:"X793+6G", image:"images/Bo_City_Library.jpg"},
+  {name:"Bonthe City Library", district:"Bonthe", region:"Southern", lat:7.5323125, lon:-12.5021875, condition:"Needs Repair", power:"Grid", verdict:"Conditionally Feasible", notes:"Place needs reliable power supply. Building needs maintainance", score:"8", download:"18.1", upload:"6.3", latency:"110", Pluscode:"GFJX+W4", image:"images/Bonthe_City_Library.jpg"},
+  {name:"Bonthe Post office", district:"Bonthe", region:"Southern", lat:8.3573125, lon:-13.7283125, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"Building is deserted not functional for years. According to stakeholder it was burnt by rebels", score:"2", download:"", upload:"", latency:"", Pluscode:"GFJX+W4", image:"images/Bonthe_Post_office.jpg"},
+  {name:"Rotifunk Post office", district:"Moyamba", region:"Southern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"Building Burnt", score:"3", download:"", upload:"", latency:"", Pluscode:"", image:"images/Rotifunk_Post_office.jpg"},
+  {name:"Fouray Bay College", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4770625, lon:-13.2214375, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"Ideal for DAP", score:"18", download:"113", upload:"25", latency:"50", Pluscode:"FQGH+RC", image:"images/Fouray_Bay_College.jpg"},
+  {name:"Fourah Bay College Hub", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4770625, lon:-13.2214375, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"Ideal for DAP", score:"16", download:"103", upload:"23", latency:"50", Pluscode:"FQGH+RC", image:"images/Fourah_Bay_College_Hub.jpg"},
+  {name:"Koidu New Sembehun City Library", district:"Kono", region:"Eastern", lat:null, lon:null, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"No Internet Access", score:"9", download:"40.1", upload:"12.4", latency:"107", Pluscode:"", image:"images/Koidu_New_Sembehun_City_Library.jpg"},
+  {name:"Kono, Koidu Post Office", district:"Kono", region:"Eastern", lat:null, lon:null, condition:"Needs Repair", power:"None", verdict:"Not Feasible", notes:"Building is still functional according to post master but needs repairs. No internet service. Mobile ineternet was used", score:"5", download:"12", upload:"2.75", latency:"115", Pluscode:"", image:"images/Kono_Koidu_Post_Office.jpg"},
+  {name:"Kenema Regional Library", district:"Kenema", region:"Eastern", lat:null, lon:null, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"Location has no internet. We used our phone to test the internet connectivity", score:"9", download:"13.1", upload:"21.5", latency:"138", Pluscode:"", image:"images/Kenema_Regional_Library.jpg"},
+  {name:"Port Loko Post Office", district:"Port Loko", region:"Northern", lat:22.4328125, lon:-103.2775625, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"Location is not functional. Deserted building no roof. Not suitable for DAP", score:"3", download:"", upload:"", latency:"", Pluscode:"CPMC+4X", image:"images/Port_Loko_Post_Office.jpg"},
+  {name:"Kenema Post Office", district:"Kenema", region:"Eastern", lat:null, lon:null, condition:"Good", power:"None", verdict:"Not Feasible", notes:"Facility has no light. No work station and no backup generator", score:"7", download:"20.5", upload:"30.7", latency:"119", Pluscode:"", image:"images/Kenema_Post_Office.jpg"},
+  {name:"Hanga Post Office", district:"Kenema", region:"Northern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"Building is burnt and deserted not functioning. Weeds all over the building", score:"2", download:"", upload:"", latency:"", Pluscode:"", image:"images/Hanga_Post_Office.jpg"},
+  {name:"Pujehun District Council", district:"Pujehun", region:"Southern", lat:8.3523125, lon:-13.7198125, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"There is currently no space. They are yet to decide how to allocate space for DAP", score:"9", download:"54", upload:"30.2", latency:"112", Pluscode:"972J+W3", image:"images/Pujehun_District_Council.jpg"},
+  {name:"Bo District Council", district:"Bo", region:"Southern", lat:7.9299375, lon:-13.5669375, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"No space in facility for DAP. Location has no internet. We used our phone to test the internet connectivity", score:"12", download:"60", upload:"30", latency:"150", Pluscode:"WCHM+X6", image:"images/Bo_District_Council.jpg"},
+  {name:"Segbwema Branch Library", district:"Kailahun", region:"Eastern", lat:null, lon:null, condition:"Excellent", power:"None", verdict:"Conditionally Feasible", notes:"There is no light currently. They use to have a generator but it’s faulty now. No internet in that facility", score:"11", download:"15", upload:"8.6", latency:"100", Pluscode:"", image:"images/Segbwema_Branch_Library.jpg"},
+
+
+
+  {name:"Pendembu Post Office", district:"Kailahun", region:"Eastern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"Site not functional. No light and weeds have taken over the site", score:"3", download:"", upload:"", latency:"", Pluscode:"", image:"images/Pendembu_Post_Office.jpg"},
+  {name:"Milton Margai Unigersity", district:"Western Area Rural", region:"Western", lat:8.4243125, lon:-13.2849375, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"College is currently undergoing renovations so all computer labs and lecture halls are full. No space yet allocated for DAP", score:"13", download:"100", upload:"22", latency:"52", Pluscode:"CPF8+P2", image:"images/Milton_Margai_Unigersity.jpg"},
+  {name:"Yengema Post Office", district:"Kono", region:"Eastern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"Destroyed during war and demolished", score:"2", download:"", upload:"", latency:"", Pluscode:"", image:"images/Yengema_Post_Office.jpg"},
+  {name:"Kailihun Post Office", district:"Kailahun", region:"Eastern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"Please has no light and internet. It was formerly subrented. Not Functional", score:"3", download:"", upload:"", latency:"", Pluscode:"", image:"images/Kailihun_Post_Office.jpg"},
+  {name:"Njala University (Bo campus)", district:"Bo", region:"Southern", lat:8.5306875, lon:-13.5018125, condition:"Good", power:"Grid", verdict:"Conditionally Feasible", notes:"No internet but building is in good condition", score:"10", download:"50.1", upload:"22", latency:"101", Pluscode:"GFJX+77", image:"images/Njala_University_(Bo_campus).jpg"},
+  {name:"Daru Post Office", district:"Kailahun", region:"Eastern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"Grid", verdict:"Not Feasible", notes:"Not functioning and occupied by some residents", score:"5", download:"", upload:"", latency:"", Pluscode:"", image:"images/Daru_Post_Office.jpg"},
+  {name:"Segbwema Post Office", district:"Kailahun", region:"Eastern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"Grid", verdict:"Not Feasible", notes:"Facility is not functioning anymore. Now used as a radio station.", score:"5", download:"", upload:"", latency:"", Pluscode:"", image:"images/Segbwema_Post_Office.jpg"},
+  {name:"Njala University (Mokondeh campus)", district:"Moyamba", region:"Southern", lat:8.1170875, lon:-13.0689219, condition:"Good", power:"Generator", verdict:"Feasible", notes:"Good for DAP", score:"16", download:"98", upload:"18", latency:"53", Pluscode:"4W8J+RC8", image:"images/Njala_University_(Mokondeh_campus).jpg"},
+  {name:"Mattru Jong Post Office", district:"Bonthe", region:"Southern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"Grid", verdict:"Not Feasible", notes:"Not Functional, Used as Radio Station", score:"6", download:"", upload:"", latency:"", Pluscode:"", image:"images/Mattru_Jong_Post_Office.jpg"},
+  {name:"Kailihun District council", district:"Kailahun", region:"Eastern", lat:null, lon:null, condition:"Good", power:"Solar", verdict:"Conditionally Feasible", notes:"According to Madam Hawa, the Chief Administrator there is no space for DAP but they can make space", score:"8", download:"44", upload:"17.3", latency:"119", Pluscode:"", image:"images/Kailihun_District_council.jpg"},
+  {name:"COMAHS Connaught Campus", district:"Western Area Urban (Freetown)", region:"Western", lat:8.4886625, lon:-13.2377969, condition:"Excellent", power:"Grid", verdict:"Feasible", notes:"Place is Ideal for DAP. The have lots of computers in their lab", score:"18", download:"5.9", upload:"10.9", latency:"104", Pluscode:"FQQ6+FV8", image:"images/COMAHS_Connaught_Campus.jpg"},
+  {name:"Kailihun District Library", district:"Kailahun", region:"Eastern", lat:null, lon:null, condition:"Good", power:"None", verdict:"Not Feasible", notes:"Place has no light or Internet. The entire Kalihun district has no light", score:"7", download:"34.7", upload:"12.1", latency:"100", Pluscode:"", image:"images/Kailihun_District_Library.jpg"},
+  {name:"Sumbaya Post Office", district:"Bo", region:"Southern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"None", verdict:"Not Feasible", notes:"This places was burnt and demolished during the way", score:"3", download:"", upload:"", latency:"", Pluscode:"", image:"images/Sumbaya_Post_Office.jpg"},
+  {name:"Kenema City Library", district:"Kenema", region:"Eastern", lat:null, lon:null, condition:"Good", power:"Solar", verdict:"Not Feasible", notes:"Facility has no internet and their primary source of light is Solar", score:"7", download:"12.8", upload:"11.2", latency:"115", Pluscode:"", image:"images/Kenema_City_Library.jpg"},
+  {name:"Blama Post Office", district:"Kenema", region:"Eastern", lat:null, lon:null, condition:"Not Functional/Destroyed/Burnt", power:"Grid", verdict:"Not Feasible", notes:"Place has been turned into a community church", score:"4", download:"", upload:"", latency:"", Pluscode:"", image:"images/Blama_Post_Office.jpg"},
+
+
+];
+
+// ================== UI ELEMENTS ===================
+const provinceFilter=document.getElementById('provinceFilter');
+const districtFilter=document.getElementById('districtFilter');
+const searchInput=document.getElementById('searchInput');
+const locationList=document.getElementById('locationList');
+const backBtn=document.getElementById('backBtn');
+const mapView=document.getElementById('mapView');
+const chartsContainer=document.getElementById('chartsContainer');
+const resetBtn=document.getElementById('resetBtn');
+
+let map,markers=[];
+
+// Populate Filters
+const provinces=[...new Set(locations.map(l=>l.region))];
+provinces.forEach(p=>provinceFilter.innerHTML+=`<option value="${p}">${p}</option>`);
+const districts=[...new Set(locations.map(l=>l.district))];
+districts.forEach(d=>districtFilter.innerHTML+=`<option value="${d}">${d}</option>`);
+
+// Filtering
+function getFilteredLocations(){
+  const search=searchInput.value.toLowerCase();
+  const prov=provinceFilter.value;
+  const dist=districtFilter.value;
+  return locations.filter(l=>
+    l.name.toLowerCase().includes(search)&&
+    (!prov||l.region===prov)&&
+    (!dist||l.district===dist)
+  );
+}
+
+// Render Sidebar List
+function renderList(data){
+  locationList.innerHTML="";
+  data.forEach(loc=>{
+    const div=document.createElement('div');
+    div.className="location-item";
+    div.innerText=loc.name;
+    div.onclick=()=>showMap(loc);
+    locationList.appendChild(div);
+  });
+}
+
+// Charts
+let provinceChart,districtChart,verdictChart,conditionChart;
+function updateCharts(filtered){
+  const provCounts={},distCounts={},verdictCounts={},condCounts={};
+  filtered.forEach(l=>{
+    provCounts[l.region]=(provCounts[l.region]||0)+1;
+    distCounts[l.district]=(distCounts[l.district]||0)+1;
+    verdictCounts[l.verdict]=(verdictCounts[l.verdict]||0)+1;
+    condCounts[l.condition]=(condCounts[l.condition]||0)+1;
+  });
+
+  if(provinceChart) provinceChart.destroy();
+  if(districtChart) districtChart.destroy();
+  if(verdictChart) verdictChart.destroy();
+  if(conditionChart) conditionChart.destroy();
+
+  provinceChart=new Chart(document.getElementById('provinceChart'),{
+    type:'bar',
+    data:{labels:Object.keys(provCounts),datasets:[{data:Object.values(provCounts),backgroundColor:['#f44336','#4caf50','#ff9800','#3f51b5']}]},
+    options:{
+      onClick:(evt,elements)=>{
+        if(elements.length>0){
+          const index=elements[0].index;
+          provinceFilter.value=provinceChart.data.labels[index];
+          refresh();
+        }
+      }
+    }
+  });
+
+  districtChart=new Chart(document.getElementById('districtChart'),{
+    type:'bar',
+    data:{labels:Object.keys(distCounts),datasets:[{data:Object.values(distCounts),backgroundColor:Object.keys(distCounts).map(()=>randomColor())}]},
+    options:{
+      onClick:(evt,elements)=>{
+        if(elements.length>0){
+          const index=elements[0].index;
+          districtFilter.value=districtChart.data.labels[index];
+          refresh();
+        }
+      }
+    }
+  });
+
+  verdictChart=new Chart(document.getElementById('verdictChart'),{
+    type:'pie',
+    data:{labels:Object.keys(verdictCounts),datasets:[{data:Object.values(verdictCounts),backgroundColor:['#EDC001','#f44336','#4caf50']}]}
+  });
+
+  conditionChart=new Chart(document.getElementById('conditionChart'),{
+    type:'pie',
+    data:{labels:Object.keys(condCounts),datasets:[{data:Object.values(condCounts),backgroundColor:['green','lightblue','#EDC001','red']}]}
+  });
+}
+
+function randomColor(){return '#'+Math.floor(Math.random()*16777215).toString(16);}
+
+// Map
+function showMap(loc){
+  chartsContainer.style.display="none";
+  mapView.style.display="block";
+  const coords=(loc.lat&&loc.lon)?[loc.lat,loc.lon]:[8.4844,-13.2344];
+  if(!map){
+    map=L.map('map').setView(coords,8);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+  }else{
+    map.setView(coords,8);
+  }
+  markers.forEach(m=>map.removeLayer(m));
+  markers=[];
+  getFilteredLocations().forEach(l=>{
+    const markerCoords=(l.lat&&l.lon)?[l.lat,l.lon]:[8.4844,-13.2344];
+    const color=l.verdict==="Feasible"?"green":(l.verdict==="Conditionally Feasible"?"orange":"red");
+    const marker=L.circleMarker(markerCoords,{color:color,radius:8}).addTo(map);
+    marker.bindPopup(l.name);
+    markers.push(marker);
+  });
+  document.getElementById('detailTitle').innerText=loc.name;
+  document.getElementById('detailPluscode').innerText=loc.Pluscode;
+  document.getElementById('detailCondition').innerText=loc.condition||"N/A";
+  document.getElementById('detailPower').innerText=loc.power||"N/A";
+  document.getElementById('detailVerdict').innerText=loc.verdict||"N/A";
+  document.getElementById('detailNotes').innerText=loc.notes||"No additional notes";
+  document.getElementById('detailImage').src=loc.image||"No image available";
+}
+backBtn.onclick=()=>{mapView.style.display="none";chartsContainer.style.display="grid";};
+
+// Refresh
+function refresh(){const data=getFilteredLocations();renderList(data);updateCharts(data);}
+resetBtn.onclick=()=>{searchInput.value="";provinceFilter.value="";districtFilter.value="";refresh();};
+searchInput.oninput=refresh;provinceFilter.onchange=refresh;districtFilter.onchange=refresh;
+refresh();
+
+// Export Functions
+function downloadChart(chart,filename){const link=document.createElement('a');link.href=chart.toBase64Image();link.download=filename;link.click();}
+document.getElementById('downloadPDF').onclick=async function(){const{jsPDF}=window.jspdf;const pdf=new jsPDF();const boxes=document.querySelectorAll('.chart-box');let y=10;for(let box of boxes){const canvas=await html2canvas(box);const img=canvas.toDataURL('image/png');pdf.addImage(img,'PNG',10,y,180,90);y+=95;if(y>250){pdf.addPage();y=10;}}pdf.save('charts.pdf');};
+document.getElementById('downloadCSV').onclick=function(){const d=getFilteredLocations();let csv="Name,District,Region,Condition,Power,Final Verdict,Plus Code,Notes\n";d.forEach(l=>{csv+=`"${l.name}","${l.district}","${l.region}","${l.condition}","${l.power}","${l.verdict}","${l.Pluscode}","${l.notes}"\n`;});const blob=new Blob([csv],{type:'text/csv'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='locations.csv';document.body.appendChild(a);a.click();document.body.removeChild(a);};
+document.getElementById('printDashboard').onclick=function(){window.print();};
+</script>
+</body>
+</html>
